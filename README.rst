@@ -25,27 +25,31 @@ Build, Setup, and Output
 
 Needs libunwind installed.  Needs LLVM *headers* local, but currently does *not* need to link against LLVM.  You do need to have run enough of an llvm-build to have the generated config header though.
 
-$ ./build.sh && a.out
-#1  0x0000000000401836 sp=0x00007ffcfdf1a160
-#2  0x000000000040125a sp=0x00007ffcfdf1a170
-stackmap record found
-faddr = 0x0000000000401250, recs=1
-  {id=2882400000, off=10, locs=5, pc=0x000000000040125a}
-#3  0x0000000000401295 sp=0x00007ffcfdf1a180
-stackmap record found
-faddr = 0x0000000000401270, recs=3
-  {id=2882400000, off=37, locs=5, pc=0x0000000000401295}
-#4  0x00007f41b32a90b3 sp=0x00007ffcfdf1a190
-#5  0x000000000040114e sp=0x00007ffcfdf1a260
-Trace/breakpoint trap (core dumped)
+.. code::
+
+  $ ./build.sh && a.out
+  #1  0x0000000000401836 sp=0x00007ffcfdf1a160
+  #2  0x000000000040125a sp=0x00007ffcfdf1a170
+  stackmap record found
+  faddr = 0x0000000000401250, recs=1
+    {id=2882400000, off=10, locs=5, pc=0x000000000040125a}
+  #3  0x0000000000401295 sp=0x00007ffcfdf1a180
+  stackmap record found
+  faddr = 0x0000000000401270, recs=3
+    {id=2882400000, off=37, locs=5, pc=0x0000000000401295}
+  #4  0x00007f41b32a90b3 sp=0x00007ffcfdf1a190
+  #5  0x000000000040114e sp=0x00007ffcfdf1a260
+  Trace/breakpoint trap (core dumped)
 
 This is the stack (including stackmaps for the relevant frames) of the first call to force_stackmap().  For context, here's the backtrace with function names:
 
-#1  0x000000000040183b sp=0x00007ffde2934ae0 _Z14force_stackmapv + 0xb
-#2  0x000000000040125a sp=0x00007ffde2934af0 _Z3bazPU3AS15GCObj + 0xa
-#3  0x0000000000401296 sp=0x00007ffde2934b00 main + 0x26
-#4  0x00007f826d71f0b3 sp=0x00007ffde2934b10 __libc_start_main + 0xf3
-#5  0x000000000040114e sp=0x00007ffde2934be0 _start + 0x2e
+.. code::
+   
+  #1  0x000000000040183b sp=0x00007ffde2934ae0 _Z14force_stackmapv + 0xb
+  #2  0x000000000040125a sp=0x00007ffde2934af0 _Z3bazPU3AS15GCObj + 0xa
+  #3  0x0000000000401296 sp=0x00007ffde2934b00 main + 0x26
+  #4  0x00007f826d71f0b3 sp=0x00007ffde2934b10 __libc_start_main + 0xf3
+  #5  0x000000000040114e sp=0x00007ffde2934be0 _start + 0x2e
 
 The two frames with stackmaps are bar and main from gc-cpp.cpp.
 
@@ -62,7 +66,10 @@ Future Work
 If we were going to turn this into something real, we'd need to define a set of language extensions for C++ to selectively enable the changes in my modified clang.  There's a lot of room for design iteration here, but let me layout one possibility.
 
 We could expose a clang::gc function attribute which would look something like:
-void foo()  __attribute__((clang::gc("statepoint-example")));
+
+.. code::
+
+  void foo()  __attribute__((clang::gc("statepoint-example")));
 
 This would map pretty directly to LLVM's setGC on the corresponding Function.  The string name would be a GC plugin; in this case, the builtin example GC for the statepoint functionality.  (For those not familiar, LLVM's notion of a GCStrategy controls *compiler* behavior and is mostly a set of config flags.  LLVM does not provide anything in the way of GC runtime support.)
 
