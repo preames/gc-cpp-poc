@@ -1,0 +1,112 @@
+diff --git a/clang/lib/CodeGen/BackendUtil.cpp b/clang/lib/CodeGen/BackendUtil.cpp
+index 0915255bf88f..8002b78a6430 100644
+--- a/clang/lib/CodeGen/BackendUtil.cpp
++++ b/clang/lib/CodeGen/BackendUtil.cpp
+@@ -1661,7 +1661,10 @@ void clang::EmitBackendOutput(DiagnosticsEngine &Diags,
+ 
+   // Verify clang's TargetInfo DataLayout against the LLVM TargetMachine's
+   // DataLayout.
+-  if (AsmHelper.TM) {
++  // GC: Need to find where clang creates it's own data layout and make the
++  // same non-integral change there.  For the moment, just suppress validation
++  // as the backend one seems to win in practice.
++  if (false && AsmHelper.TM) {
+     std::string DLDesc = M->getDataLayout().getStringRepresentation();
+     if (DLDesc != TDesc) {
+       unsigned DiagID = Diags.getCustomDiagID(
+diff --git a/clang/lib/CodeGen/CodeGenFunction.cpp b/clang/lib/CodeGen/CodeGenFunction.cpp
+index f5eed8572daa..a6202b24e9aa 100644
+--- a/clang/lib/CodeGen/CodeGenFunction.cpp
++++ b/clang/lib/CodeGen/CodeGenFunction.cpp
+@@ -1402,6 +1402,11 @@ void CodeGenFunction::GenerateCode(GlobalDecl GD, llvm::Function *Fn,
+   // a quick pass now to see if we can.
+   if (!CurFn->doesNotThrow())
+     TryMarkNoThrow(CurFn);
++
++  // GC: Tag all functions as using statepoint-example so that we get
++  // stackmaps in the documented format.  We really need to figure out
++  // the language mechanism to make this configurable.
++  CurFn->setGC("statepoint-example");
+ }
+ 
+ /// ContainsLabel - Return true if the statement contains a label in it.  If
+diff --git a/clang/lib/Driver/Tool.cpp b/clang/lib/Driver/Tool.cpp
+index a198f4f3b675..9f0e40a5f55e 100644
+--- a/clang/lib/Driver/Tool.cpp
++++ b/clang/lib/Driver/Tool.cpp
+@@ -9,6 +9,10 @@
+ #include "clang/Driver/Tool.h"
+ #include "clang/Driver/InputInfo.h"
+ 
++// GC: clang appears not to link in the builtin GCs.  This isn't the "right"
++// fix, but it brute forces the problem for now.
++#include "llvm/CodeGen/LinkAllCodegenComponents.h"
++
+ using namespace clang::driver;
+ 
+ Tool::Tool(const char *_Name, const char *_ShortName, const ToolChain &TC)
+diff --git a/llvm/lib/CodeGen/StackMaps.cpp b/llvm/lib/CodeGen/StackMaps.cpp
+index 36e8f129ea15..f4d7f5b2e719 100644
+--- a/llvm/lib/CodeGen/StackMaps.cpp
++++ b/llvm/lib/CodeGen/StackMaps.cpp
+@@ -724,7 +724,14 @@ void StackMaps::serializeToStackMapSection() {
+   OS.SwitchSection(StackMapSection);
+ 
+   // Emit a dummy symbol to force section inclusion.
+-  OS.emitLabel(OutContext.getOrCreateSymbol(Twine("__LLVM_StackMaps")));
++  // GC: For the moment, make the symbol public so we have a way to find
++  // the section from C++ code.  For some reason, the __start and __stop
++  // symbols don't seem to be getting created by the linker.  In general,
++  // we need to spend time on the link semantics of this section.
++  auto *S = OutContext.getOrCreateSymbol(Twine("__LLVM_StackMaps"));
++  OS.emitSymbolAttribute(S, MCSA_Global);
++  OS.emitLabel(S);
++
+ 
+   // Serialize data.
+   LLVM_DEBUG(dbgs() << "********** Stack Map Output **********\n");
+diff --git a/llvm/lib/CodeGen/TargetPassConfig.cpp b/llvm/lib/CodeGen/TargetPassConfig.cpp
+index 4024fd452fc4..bb3adc07e482 100644
+--- a/llvm/lib/CodeGen/TargetPassConfig.cpp
++++ b/llvm/lib/CodeGen/TargetPassConfig.cpp
+@@ -1055,6 +1055,10 @@ bool TargetPassConfig::addISelPasses() {
+   if (TM->useEmulatedTLS())
+     addPass(createLowerEmuTLSPass());
+ 
++  // GC: This seems like a reasonable place for RS4GC, but ran into
++  // linker errors when tried.
++  //addPass(createRewriteStatepointsForGCLegacyPass());
++  
+   addPass(createPreISelIntrinsicLoweringPass());
+   PM->add(createTargetTransformInfoWrapperPass(TM->getTargetIRAnalysis()));
+   addIRPasses();
+diff --git a/llvm/lib/Passes/PassBuilder.cpp b/llvm/lib/Passes/PassBuilder.cpp
+index 2972687274f5..d8c801a7e442 100644
+--- a/llvm/lib/Passes/PassBuilder.cpp
++++ b/llvm/lib/Passes/PassBuilder.cpp
+@@ -1514,6 +1514,10 @@ PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel Level,
+   if (LTOPreLink)
+     addRequiredLTOPreLinkPasses(MPM);
+ 
++  // GC: Run RS4GC at the end of the normal O3 pipeline.  See comment
++  // in the codegen pipeline about why this is here.
++  MPM.addPass(RewriteStatepointsForGC());
++
+   return MPM;
+ }
+ 
+diff --git a/llvm/lib/Target/X86/X86TargetMachine.cpp b/llvm/lib/Target/X86/X86TargetMachine.cpp
+index ee8cff3e008b..b8ca594ba4bd 100644
+--- a/llvm/lib/Target/X86/X86TargetMachine.cpp
++++ b/llvm/lib/Target/X86/X86TargetMachine.cpp
+@@ -147,6 +147,10 @@ static std::string computeDataLayout(const Triple &TT) {
+   else
+     Ret += "-S128";
+ 
++  // GC: Mark address space 1 as non-integral (for use by GC)
++  // Really need a way for this to be configured.
++  Ret += "-ni:1";
++
+   return Ret;
+ }
+ 
